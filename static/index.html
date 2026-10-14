@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Business Knowledge Assistant</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --accent:#38bdf8; --text:#e2e8f0; --muted:#94a3b8; --cite:#fbbf24; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
+  .wrap { max-width:860px; margin:0 auto; padding:32px 20px 64px; }
+  h1 { font-size:28px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin-bottom:28px; }
+  .card { background:var(--card); border-radius:12px; padding:20px; margin-bottom:20px; }
+  .card h2 { margin:0 0 12px; font-size:17px; }
+  #drop { border:2px dashed #475569; border-radius:10px; padding:28px; text-align:center; color:var(--muted); cursor:pointer; transition:.15s; }
+  #drop:hover, #drop.over { border-color:var(--accent); color:var(--text); background:#0b1220; }
+  #doclist { list-style:none; padding:0; margin:12px 0 0; }
+  #doclist li { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#0b1220; border-radius:8px; margin-bottom:8px; font-size:14px; }
+  #doclist .meta { color:var(--muted); font-size:12px; margin-left:8px; }
+  #doclist button { background:#7f1d1d; color:#fecaca; border:none; border-radius:6px; padding:6px 10px; cursor:pointer; }
+  .row { display:flex; gap:10px; }
+  input[type=text] { flex:1; padding:12px 14px; border-radius:8px; border:1px solid #475569; background:#0b1220; color:var(--text); font-size:15px; }
+  button.primary { background:var(--accent); color:#082f49; border:none; border-radius:8px; padding:12px 20px; font-size:15px; font-weight:700; cursor:pointer; }
+  button.primary:disabled { opacity:.5; cursor:wait; }
+  #answer { white-space:pre-wrap; line-height:1.65; font-size:15px; }
+  #answer.refused { color:var(--muted); font-style:italic; }
+  .cite { background:#422006; color:var(--cite); border-radius:6px; padding:2px 8px; font-size:13px; font-weight:600; white-space:nowrap; }
+  .chunk { background:#0b1220; border-left:3px solid var(--cite); border-radius:0 8px 8px 0; padding:10px 14px; margin:10px 0; font-size:14px; }
+  .chunk .head { font-size:12px; color:var(--muted); margin-bottom:6px; }
+  .chunk .score { float:right; color:var(--accent); font-weight:700; }
+  .hint { color:var(--muted); font-size:13px; margin-top:8px; }
+  .status { font-size:13px; color:var(--muted); margin-top:10px; min-height:18px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📚 Business Knowledge Assistant</h1>
+  <div class="sub">Upload company PDFs, ask questions, get answers with quoted sources. 100% local — nothing leaves this machine.</div>
+
+  <div class="card">
+    <h2>1 · Documents</h2>
+    <div id="drop">Drop a PDF here or click to choose<input type="file" id="file" accept=".pdf" hidden></div>
+    <ul id="doclist"></ul>
+    <div class="status" id="upstatus"></div>
+  </div>
+
+  <div class="card">
+    <h2>2 · Ask a question</h2>
+    <div class="row">
+      <input type="text" id="q" placeholder="e.g. How many vacation days do employees get?" maxlength="500">
+      <button class="primary" id="ask">Ask</button>
+    </div>
+    <div class="hint">Try: “What is the minimum password length?” · “How long does the WidgetPro 3000 battery last?” · “What is the refund policy?” (not in the docs → watch the refusal)</div>
+  </div>
+
+  <div class="card" id="anscard" hidden>
+    <h2>3 · Answer</h2>
+    <div id="answer"></div>
+    <div id="chunks"></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+async function refreshDocs() {
+  const r = await fetch('/api/documents');
+  const docs = await r.json();
+  const ul = $('doclist');
+  ul.innerHTML = '';
+  docs.forEach(d => {
+    const li = document.createElement('li');
+    li.innerHTML = `<span>📄 ${d.filename}<span class="meta">${d.pages} pages · ${d.chunks} chunks</span></span>`;
+    const b = document.createElement('button');
+    b.textContent = 'Delete';
+    b.onclick = async () => { await fetch('/api/documents/' + d.doc_id, {method:'DELETE'}); refreshDocs(); };
+    li.appendChild(b);
+    ul.appendChild(li);
+  });
+}
+
+async function uploadFile(f) {
+  if (!f) return;
+  $('upstatus').textContent = 'Uploading ' + f.name + ' …';
+  const fd = new FormData();
+  fd.append('file', f);
+  const r = await fetch('/api/upload', {method:'POST', body:fd});
+  const j = await r.json();
+  $('upstatus').textContent = r.ok ? `✓ ${j.filename}: ${j.pages} pages, ${j.chunks} chunks indexed.` : '✗ ' + (j.detail || 'upload failed');
+  refreshDocs();
+}
+
+const drop = $('drop'), fileInput = $('file');
+drop.onclick = () => fileInput.click();
+fileInput.onchange = e => uploadFile(e.target.files[0]);
+['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => uploadFile(e.dataTransfer.files[0]));
+
+function renderAnswer(data) {
+  $('anscard').hidden = false;
+  const box = $('answer');
+  box.classList.toggle('refused', data.refused);
+  // Highlight citation markers in the answer text.
+  box.innerHTML = data.answer
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/\[source: ([^\]]+)\]/g, '<span class="cite">[source: $1]</span>');
+  const ch = $('chunks');
+  ch.innerHTML = '';
+  data.citations.forEach(c => {
+    const div = document.createElement('div');
+    div.className = 'chunk';
+    div.innerHTML = `<div class="head">📄 ${c.filename} · page ${c.page}<span class="score">score ${c.score}</span></div><div>“${c.text.replace(/</g,'&lt;')}”</div>`;
+    ch.appendChild(div);
+  });
+  $('anscard').scrollIntoView({behavior:'smooth'});
+}
+
+async function ask() {
+  const q = $('q').value.trim();
+  if (q.length < 2) return;
+  const btn = $('ask');
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const r = await fetch('/api/ask', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({question:q})});
+    const j = await r.json();
+    if (!r.ok) { $('anscard').hidden = false; $('answer').textContent = '⚠ ' + (j.detail || 'error'); $('chunks').innerHTML=''; }
+    else renderAnswer(j);
+  } finally { btn.disabled = false; btn.textContent = 'Ask'; }
+}
+$('ask').onclick = ask;
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') ask(); });
+
+refreshDocs();
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Runtime data (uploads + local index) -- never commit user uploads
+data/uploads/
+data/*.json
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Test cache
+.pytest_cache/

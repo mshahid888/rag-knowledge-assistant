@@ -1,0 +1,11 @@
+fastapi>=0.110
+uvicorn>=0.29
+pypdf>=4.0
+python-multipart>=0.0.9
+fpdf2>=2.7  # only needed to regenerate the sample PDFs
+
+# --- dev / test ---
+pytest>=8.0
+
+# --- optional upgrade path (neural embeddings) ---
+# sentence-transformers>=2.5
